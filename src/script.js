@@ -18,9 +18,9 @@ let whiteboardCanvas, whiteboardCtx, canvasTexture;
 let drawColor = '#ff0000';
 let drawWidth = 5;
 let lastPoint = null;
-const CANVAS_WIDTH = 1024;
-const CANVAS_HEIGHT = 512;
-const DRAW_THRESHOLD = 0.01; // How close stylus needs to be to draw
+const CANVAS_WIDTH = 2048;
+const CANVAS_HEIGHT = 1024;
+const DRAW_THRESHOLD = 0.05; // How close stylus needs to be to draw
 
 function clearWhiteboard() {
   whiteboardCtx.fillStyle = 'white';
