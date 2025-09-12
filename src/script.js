@@ -116,6 +116,12 @@ function animate() {
   renderer.render(scene, camera);
 }
 
+// MX Ink button indices:
+// 5: tip (float)
+// 0: front (bool)
+// 4: middle (float)
+// 1: rear (bool)
+
 function handleDrawing(controller) {
   if (!controller) return;
 
