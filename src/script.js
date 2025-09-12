@@ -101,7 +101,7 @@ window.addEventListener("resize", () => {
 function animate() {
   if (gamepad1) {
     prevIsDrawing = isDrawing;
-    isDrawing = gamepad1.buttons[5].value > 0;
+    isDrawing = gamepad1.buttons[5].value > 0 || gamepad1.buttons[4].value > 0;
     // debugGamepad(gamepad1);
 
     if (isDrawing && !prevIsDrawing) {
@@ -125,7 +125,7 @@ function handleDrawing(controller) {
   if (gamepad1) {
     cursor.set(stylus.position.x, stylus.position.y, stylus.position.z);
 
-    if (userData.isSelecting || isDrawing) {
+    if (isDrawing) {
       painter.lineTo(cursor);
       painter.update();
     }
