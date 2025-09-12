@@ -191,6 +191,9 @@ function animate() {
       drawOnCanvas(lastPoint, currentPoint);
       isDrawingOutsideWhiteboard = false; // do not draw in 3D
     }
+
+    controllerGrip1.visible = isDrawingOutsideWhiteboard;
+
     // Update lastPoint for the next move.
     // If currentPoint is null (stylus is too far), this will break the line.
     lastPoint = currentPoint;
