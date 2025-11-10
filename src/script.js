@@ -2,6 +2,8 @@ import * as THREE from "three";
 import { TubePainter } from "three/examples/jsm/misc/TubePainter.js";
 import { XRButton } from "three/examples/jsm/webxr/XRButton.js";
 import { XRControllerModelFactory } from "three/examples/jsm/webxr/XRControllerModelFactory.js";
+import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
+import { WhiteboardMarkerConstraint } from "./WhiteboardMarkerConstraint";
 
 let camera, scene, renderer;
 let controller1, controller2;
@@ -20,7 +22,10 @@ let drawWidth = 5;
 let lastPoint = null;
 const CANVAS_WIDTH = 2048;
 const CANVAS_HEIGHT = 1024;
-const DRAW_THRESHOLD = 0.05; // How close stylus needs to be to draw
+const DRAW_THRESHOLD = 0.002; // How close stylus needs to be to draw
+
+let constraint; // WhiteboardMarkerConstraint
+let stylus3dModel
 
 function clearWhiteboard() {
   whiteboardCtx.fillStyle = 'white';
@@ -127,18 +132,18 @@ function init() {
   controller1.addEventListener("connected", onControllerConnected);
   controller1.addEventListener("selectstart", onSelectStart);
   controller1.addEventListener("selectend", onSelectEnd);
-  controllerGrip1 = renderer.xr.getControllerGrip(0);
-  controllerGrip1.add(controllerModelFactory.createControllerModel(controllerGrip1));
-  scene.add(controllerGrip1);
+  // controllerGrip1 = renderer.xr.getControllerGrip(0);
+  // controllerGrip1.add(controllerModelFactory.createControllerModel(controllerGrip1));
+  // scene.add(controllerGrip1);
   scene.add(controller1);
 
   controller2 = renderer.xr.getController(1);
   controller2.addEventListener("connected", onControllerConnected);
   controller2.addEventListener("selectstart", onSelectStart);
   controller2.addEventListener("selectend", onSelectEnd);
-  controllerGrip2 = renderer.xr.getControllerGrip(1);
-  controllerGrip2.add(controllerModelFactory.createControllerModel(controllerGrip2));
-  scene.add(controllerGrip2);
+  // controllerGrip2 = renderer.xr.getControllerGrip(1);
+  // controllerGrip2.add(controllerModelFactory.createControllerModel(controllerGrip2));
+  // scene.add(controllerGrip2);
   scene.add(controller2);
 
 
@@ -154,7 +159,7 @@ function init() {
   canvasTexture = new THREE.CanvasTexture(whiteboardCanvas);
 
   // --- Whiteboard 3D Object ---
-  const whiteboardGeometry = new THREE.PlaneGeometry(2, 1);
+  const whiteboardGeometry = new THREE.PlaneGeometry(1, 0.5);
   const whiteboardMaterial = new THREE.MeshStandardMaterial({
     map: canvasTexture,
     side: THREE.DoubleSide,
@@ -162,8 +167,38 @@ function init() {
     metalness: 0.1
   });
   whiteboard = new THREE.Mesh(whiteboardGeometry, whiteboardMaterial);
-  whiteboard.position.set(0, 1.0, -0.2); // Position in 3D space
+  whiteboard.position.set(0, 0.7, -0.4); // Position in 3D space
   scene.add(whiteboard);
+
+  // --- Whiteboard constraint ---
+  constraint = new WhiteboardMarkerConstraint({
+    whiteboardSize: new THREE.Vector3(whiteboardGeometry.width, whiteboardGeometry.height, 0),
+    whiteboardPosition: new THREE.Vector3(whiteboard.position.x, whiteboard.position.y, whiteboard.position.z),
+    whiteboardRotation: new THREE.Quaternion(),
+    markerLength: 0.16
+  });
+
+  // --- Load MX Ink 3D model ---
+  // Could use the model from the XR Controller Model Factory, but this makes it easier to 
+  // handle constrained position when touching the virtual whiteboard
+  const loader = new GLTFLoader();
+  loader.load(
+    "assets/logitech_mx_ink.glb",
+    (glb) => {
+      console.log(glb);
+      stylus3dModel = new THREE.Group();
+      const mxink = glb.scene;
+      mxink.rotateY(Math.PI);
+      stylus3dModel.add(mxink);
+      scene.add(stylus3dModel);
+    },
+    function (xhr) {
+      console.log((xhr.loaded / xhr.total) * 100 + "% loaded");
+    },
+    function (error) {
+      console.log("An error happened:", error);
+    }
+  );
 }
 
 window.addEventListener("resize", () => {
@@ -183,16 +218,24 @@ window.addEventListener("resize", () => {
 function animate() {
   if (gamepad1) {
     prevIsDrawing = isDrawingOutsideWhiteboard;
+    // stylus inputs: primary and/or tip is active
     isDrawingOutsideWhiteboard = gamepad1.buttons[5].value > 0 || gamepad1.buttons[4].value > 0;
     // debugGamepad(gamepad1);
 
-    const currentPoint = getDrawingCoordinates(stylus.position);
+    const constrainedPose = constraint.getVisibleMarkerPose({
+      position: stylus.position,
+      rotation: stylus.quaternion
+    });
+
+    // Update stylus pose
+    stylus3dModel.position.copy(constrainedPose.tipPosition);
+    stylus3dModel.rotation.setFromQuaternion(constrainedPose.rotation);
+
+    const currentPoint = getDrawingCoordinates(constrainedPose.tipPosition);
     if (lastPoint && currentPoint) {
       drawOnCanvas(lastPoint, currentPoint);
       isDrawingOutsideWhiteboard = false; // do not draw in 3D
     }
-
-    controllerGrip1.visible = isDrawingOutsideWhiteboard;
 
     // Update lastPoint for the next move.
     // If currentPoint is null (stylus is too far), this will break the line.
