@@ -34,9 +34,28 @@ npm run dev
 
 This will start a local development server. Open your browser and navigate to `http://localhost:5173` (or the port specified in your console output).
 
+Use adb port reversing to sue the localhost url in the headset:
+
+```sh
+adb reverse tcp:5173 tcp:5173
+```
+
+## Debugging
+
+After browsing to your website on the device in Browser, you can debug it remotely using the Chrome Developer tools.
+
+To start a remote debugging session:
+
+1. On the device, browse to your website in Browser.
+2. Launch Google Chrome.
+3. Navigate to `chrome://inspect/#devices`.
+4. Find your device, which will be followed by a set of Browser tabs currently open on the device.
+5. Click inspect to start debugging a tab in Browser.
+
 ## Building for Production
 
 To create a production build:
+
 ```sh
 npm run build
 ```
