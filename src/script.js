@@ -3,6 +3,8 @@ import { TubePainter } from "three/examples/jsm/misc/TubePainter.js";
 import { XRButton } from "three/examples/jsm/webxr/XRButton.js";
 import { XRControllerModelFactory } from "three/examples/jsm/webxr/XRControllerModelFactory.js";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
+import { HTMLMesh } from 'three/addons/interactive/HTMLMesh.js';
+import { InteractiveGroup } from 'three/addons/interactive/InteractiveGroup.js';
 import { WhiteboardMarkerConstraint } from "./WhiteboardMarkerConstraint";
 
 let camera, scene, renderer;
@@ -17,7 +19,7 @@ let prevIsDrawing = false;
 // Whiteboard drawing
 let whiteboard;
 let whiteboardCanvas, whiteboardCtx, canvasTexture;
-let drawColor = '#ff0000';
+let whiteboardInkColor = '#000000';
 let drawWidth = 5;
 let lastPoint = null;
 const CANVAS_WIDTH = 2048;
@@ -37,7 +39,7 @@ function drawOnCanvas(from, to) {
   whiteboardCtx.beginPath();
   whiteboardCtx.moveTo(from.x, from.y);
   whiteboardCtx.lineTo(to.x, to.y);
-  whiteboardCtx.strokeStyle = drawColor;
+  whiteboardCtx.strokeStyle = whiteboardInkColor;
   whiteboardCtx.lineWidth = drawWidth;
   whiteboardCtx.lineCap = 'round';
   whiteboardCtx.lineJoin = 'round';
@@ -83,8 +85,13 @@ function getDrawingCoordinates(worldPosition) {
   };
 }
 
-const material = new THREE.MeshNormalMaterial({
+const painterNormalMaterial = new THREE.MeshNormalMaterial({
   flatShading: true,
+  side: THREE.DoubleSide,
+});
+
+const painterUnlitMaterial = new THREE.MeshBasicMaterial({
+  color: new THREE.Color().setRGB(0, 0.5, 1.0),
   side: THREE.DoubleSide,
 });
 
@@ -96,6 +103,57 @@ const sizes = {
 };
 
 init();
+
+function setupUi() {
+  // Add ray visualizers (lines) so users see where they point
+  const geometry = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 0, -5)]);
+  const line = new THREE.Line(geometry);
+  line.name = 'line';
+  line.scale.z = 5;
+
+  controller1.add(line.clone());
+  controller2.add(line.clone());
+
+  // Setup InteractiveGroup
+  // This group handles the "translation" of 3D raycasts to 2D DOM events
+  const interactionGroup = new InteractiveGroup(renderer, camera);
+  scene.add(interactionGroup);
+
+  // Listen to the controllers for interaction
+  interactionGroup.listenToXRControllerEvents(controller1);
+  interactionGroup.listenToXRControllerEvents(controller2);
+
+  // Create the HTMLMesh
+  const paletteEl = document.getElementById('color-palette');
+  const paletteMesh = new HTMLMesh(paletteEl);
+
+  // Position the palette in 3D space (e.g., floating in front of user)
+  paletteMesh.position.set(0, 0.75, -0.39);
+  paletteMesh.scale.setScalar(0.5);
+  paletteMesh.rotation.x = -0.1; // Tilt slightly up for ergonomics
+
+  // Add the mesh to the interaction group, NOT directly to the scene
+  interactionGroup.add(paletteMesh);
+}
+
+// Application Logic
+window.selectColor = (colorHex) => {
+  let buttons = document.getElementsByClassName('color-btn');
+  console.log(buttons);
+  for (const button of buttons) {
+    button.classList.remove('selected');
+  }
+  const buttonId = `colorButton_${colorHex.replace('#', '')}`;
+  console.log(buttonId)
+  document.getElementById(buttonId).classList.toggle('selected');
+  console.log("Color selected from VR:", colorHex);
+
+  // Apply color to whiteboard
+  whiteboardInkColor = colorHex;
+  // Apply color to 3D drawings
+  painter1.mesh.material.color.set(colorHex);
+
+};
 
 function init() {
   const canvas = document.querySelector("canvas.webgl");
@@ -114,7 +172,7 @@ function init() {
   scene.add(light);
 
   painter1 = new TubePainter();
-  painter1.mesh.material = material;
+  painter1.mesh.material = painterUnlitMaterial;
   painter1.setSize(0.1);
 
   scene.add(painter1.mesh);
@@ -167,7 +225,7 @@ function init() {
     metalness: 0.1
   });
   whiteboard = new THREE.Mesh(whiteboardGeometry, whiteboardMaterial);
-  whiteboard.position.set(0, 0.7, -0.4); // Position in 3D space
+  whiteboard.position.set(0, 1.0, -0.4); // Position in 3D space
   scene.add(whiteboard);
 
   // --- Whiteboard constraint ---
@@ -199,6 +257,8 @@ function init() {
       console.log("An error happened:", error);
     }
   );
+
+  setupUi();
 }
 
 window.addEventListener("resize", () => {
