@@ -1,7 +1,7 @@
 import * as THREE from "three";
-import { TubePainter } from "three/examples/jsm/misc/TubePainter.js";
+import { VariableTubePainter } from "./VariableTubePainter";
 import { XRButton } from "three/examples/jsm/webxr/XRButton.js";
-import { XRControllerModelFactory } from "three/examples/jsm/webxr/XRControllerModelFactory.js";
+//import { XRControllerModelFactory } from "three/examples/jsm/webxr/XRControllerModelFactory.js";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { HTMLMesh } from 'three/addons/interactive/HTMLMesh.js';
 import { InteractiveGroup } from 'three/addons/interactive/InteractiveGroup.js';
@@ -9,10 +9,12 @@ import { WhiteboardMarkerConstraint } from "./WhiteboardMarkerConstraint";
 
 let camera, scene, renderer;
 let controller1, controller2;
-let controllerGrip1, controllerGrip2;
+// let controllerGrip1, controllerGrip2;
 let stylus;
-let painter1;
+let strokes = [];
+let painter = null;
 let gamepad1;
+let rearButtonPressed = false;
 let isDrawingOutsideWhiteboard = false;
 let prevIsDrawing = false;
 
@@ -20,7 +22,8 @@ let prevIsDrawing = false;
 let whiteboard;
 let whiteboardCanvas, whiteboardCtx, canvasTexture;
 let whiteboardInkColor = '#000000';
-let drawWidth = 5;
+let drawWidth = 12;
+let eraserWidth = 36;
 let lastPoint = null;
 const CANVAS_WIDTH = 2048;
 const CANVAS_HEIGHT = 1024;
@@ -40,13 +43,12 @@ function drawOnCanvas(from, to) {
   whiteboardCtx.moveTo(from.x, from.y);
   whiteboardCtx.lineTo(to.x, to.y);
   whiteboardCtx.strokeStyle = whiteboardInkColor;
-  whiteboardCtx.lineWidth = drawWidth;
+  whiteboardCtx.lineWidth = whiteboardInkColor === "#FFFFFF" ? eraserWidth : drawWidth;
   whiteboardCtx.lineCap = 'round';
   whiteboardCtx.lineJoin = 'round';
   whiteboardCtx.stroke();
   // Tell three.js to update the texture
   if (canvasTexture) canvasTexture.needsUpdate = true;
-  console.log(`${JSON.stringify(from)} - ${JSON.stringify(to)}`);
 }
 // This function converts a 3D world position to 2D canvas coordinates
 function getDrawingCoordinates(worldPosition) {
@@ -85,18 +87,6 @@ function getDrawingCoordinates(worldPosition) {
   };
 }
 
-const painterNormalMaterial = new THREE.MeshNormalMaterial({
-  flatShading: true,
-  side: THREE.DoubleSide,
-});
-
-const painterUnlitMaterial = new THREE.MeshBasicMaterial({
-  color: new THREE.Color().setRGB(0, 0.5, 1.0),
-  side: THREE.DoubleSide,
-});
-
-const cursor = new THREE.Vector3();
-
 const sizes = {
   width: window.innerWidth,
   height: window.innerHeight,
@@ -106,10 +96,10 @@ init();
 
 function setupUi() {
   // Add ray visualizers (lines) so users see where they point
-  const geometry = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 0, -5)]);
+  const geometry = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 0, -0.5)]);
   const line = new THREE.Line(geometry);
   line.name = 'line';
-  line.scale.z = 5;
+  line.scale.z = 0.5;
 
   controller1.add(line.clone());
   controller2.add(line.clone());
@@ -130,29 +120,23 @@ function setupUi() {
   // Position the palette in 3D space (e.g., floating in front of user)
   paletteMesh.position.set(0, 0.75, -0.39);
   paletteMesh.scale.setScalar(0.5);
-  paletteMesh.rotation.x = -0.1; // Tilt slightly up for ergonomics
+  paletteMesh.rotation.x = -0.2; // Tilt slightly up for ergonomics
 
   // Add the mesh to the interaction group, NOT directly to the scene
   interactionGroup.add(paletteMesh);
 }
 
-// Application Logic
+// UI actions
 window.selectColor = (colorHex) => {
   let buttons = document.getElementsByClassName('color-btn');
-  console.log(buttons);
   for (const button of buttons) {
     button.classList.remove('selected');
   }
   const buttonId = `colorButton_${colorHex.replace('#', '')}`;
-  console.log(buttonId)
   document.getElementById(buttonId).classList.toggle('selected');
-  console.log("Color selected from VR:", colorHex);
 
   // Apply color to whiteboard
   whiteboardInkColor = colorHex;
-  // Apply color to 3D drawings
-  painter1.mesh.material.color.set(colorHex);
-
 };
 
 function init() {
@@ -171,12 +155,6 @@ function init() {
   light.position.set(0, 2, 2);
   scene.add(light);
 
-  painter1 = new TubePainter();
-  painter1.mesh.material = painterUnlitMaterial;
-  painter1.setSize(0.1);
-
-  scene.add(painter1.mesh);
-
   renderer = new THREE.WebGLRenderer({ antialias: true, canvas });
   renderer.setPixelRatio(window.devicePixelRatio, 2);
   renderer.setSize(sizes.width, sizes.height);
@@ -184,7 +162,7 @@ function init() {
   renderer.xr.enabled = true;
   document.body.appendChild(XRButton.createButton(renderer, { optionalFeatures: ["unbounded"] }));
 
-  const controllerModelFactory = new XRControllerModelFactory();
+  // const controllerModelFactory = new XRControllerModelFactory();
 
   controller1 = renderer.xr.getController(0);
   controller1.addEventListener("connected", onControllerConnected);
@@ -275,6 +253,32 @@ window.addEventListener("resize", () => {
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 });
 
+function initVariableTubePainter() {
+  // 1. Create a new Painter logic instance
+  painter = new VariableTubePainter();
+
+  // 2. Pick a random neon color
+  const color = new THREE.Color(whiteboardInkColor);
+
+  // 3. Create Material
+  const material = new THREE.MeshBasicMaterial({
+    color: color
+  });
+
+  // 4. Create Mesh and add to scene
+  const mesh = new THREE.Mesh(painter.geometry, material);
+  mesh.frustumCulled = false; // Important for dynamic geometry
+
+  scene.add(mesh);
+
+  painter.mesh = mesh;
+
+  strokes.push(painter);
+
+  // Initialize the first point
+  painter.moveTo(stylus.position);
+}
+
 function animate() {
   if (gamepad1) {
     prevIsDrawing = isDrawingOutsideWhiteboard;
@@ -298,39 +302,42 @@ function animate() {
     }
 
     // Update lastPoint for the next move.
-    // If currentPoint is null (stylus is too far), this will break the line.
     lastPoint = currentPoint;
 
     if (isDrawingOutsideWhiteboard && !prevIsDrawing) {
-      const painter = stylus.userData.painter;
-      painter.moveTo(stylus.position);
+      initVariableTubePainter();
     }
   }
 
   handleDrawing(stylus);
 
+  if (gamepad1) {
+    if (gamepad1.buttons[1].value && !rearButtonPressed) {
+      rearButtonPressed = true;
+      let stroke = strokes.pop();
+      if (stroke) {
+        stroke.mesh.removeFromParent();
+        stroke = undefined;
+      }
+    }
+    rearButtonPressed = gamepad1.buttons[1].value;
+  }
   // Render
   renderer.render(scene, camera);
 }
-
-// MX Ink button indices:
-// 5: tip (float)
-// 0: front (bool)
-// 4: middle (float)
-// 1: rear (bool)
 
 function handleDrawing(controller) {
   if (!controller) return;
 
   const userData = controller.userData;
-  const painter = userData.painter;
 
   if (gamepad1) {
-    cursor.set(stylus.position.x, stylus.position.y, stylus.position.z);
-
     if (isDrawingOutsideWhiteboard) {
-      painter.lineTo(cursor);
-      painter.update();
+      if (painter) {
+        // Update the stroke
+        const width = Math.max(gamepad1.buttons[5].value, gamepad1.buttons[4].value);
+        painter.lineTo(stylus.position, width * 0.01);
+      }
     }
   }
 }
@@ -338,22 +345,26 @@ function handleDrawing(controller) {
 function onControllerConnected(e) {
   if (e.data.profiles.includes("logitech-mx-ink")) {
     stylus = e.target;
-    stylus.userData.painter = painter1;
     gamepad1 = e.data.gamepad;
   }
 }
 
 function onSelectStart(e) {
-  if (e.target !== stylus) return;
-  const painter = stylus.userData.painter;
-  painter.moveTo(stylus.position);
+  console.log(`onSelectStart`);
   this.userData.isSelecting = true;
+  if (e.target !== stylus) return;
 }
 
 function onSelectEnd() {
+  console.log(`onSelectEnd`);
   this.userData.isSelecting = false;
 }
 
+// MX Ink button indices:
+// 5: tip (float)
+// 0: front (bool)
+// 4: middle (float)
+// 1: rear (bool)
 function debugGamepad(gamepad) {
   gamepad.buttons.forEach((btn, index) => {
     if (btn.pressed) {
