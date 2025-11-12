@@ -14,3 +14,28 @@ body {
   left: 0;
   outline: none;
 }
+
+#color-palette {
+  width: 1000px;
+  height: 90px;
+  background: rgba(234, 234, 234, 0.901);
+  border-radius: 30px;
+  padding: 40px;
+  display: grid;
+  grid-template-columns: repeat(9, 1fr);
+}
+
+.color-btn {
+  aspect-ratio: 1;
+  border: none;
+  border-radius: 50%;
+  cursor: pointer;
+  transition: transform 0.1s;
+  width: 90px;
+  height: 90px;
+}
+
+.color-btn.selected {
+  transform: scale(1.1);
+  border: 15px solid #8f8f8f;
+}
