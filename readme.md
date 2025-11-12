@@ -1,26 +1,24 @@
 # MX Ink WebXR
 
-This template uses Three.js and WebXR to provide an immersive 3D painting experience using Logitech MX-INK.
-
-<p align="center">
-<img src="https://github.com/user-attachments/assets/a0bdc4d3-40b8-4f5e-99eb-8d664477294b" alt="MX Ink WebXR Demo" width="500"/>
-</p>
+This application uses Three.js and WebXR to provide an immersive 3D painting experience using Logitech MX-INK, featuring a virtual whiteboard and free in-air drawing.
 
 ## Prerequisites
 
 - Node.js (version 12.0 or higher recommended)
 - Logitech MX-INK Stylus
-- Quest 3/3S headset 
+- Quest 3/3S headset
 
 ## Setup
 
 1. Clone the repository:
+
 ```sh
 git clone https://github.com/yourusername/mx-ink-webxr.git
 cd mx-ink-webxr
 ```
 
 2. Install dependencies:
+
 ```sh
 npm install
 ```
@@ -28,6 +26,7 @@ npm install
 ## Running the Application
 
 To run the application in development mode:
+
 ```sh
 npm run dev
 ```
@@ -59,7 +58,6 @@ To create a production build:
 ```sh
 npm run build
 ```
-
 
 This will generate optimized files in the `dist` directory.
 
