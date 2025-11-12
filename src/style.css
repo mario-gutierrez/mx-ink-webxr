@@ -16,13 +16,13 @@ body {
 }
 
 #color-palette {
-  width: 1000px;
+  width: 1100px;
   height: 90px;
   background: rgba(234, 234, 234, 0.901);
   border-radius: 30px;
   padding: 40px;
   display: grid;
-  grid-template-columns: repeat(9, 1fr);
+  grid-template-columns: repeat(10, 1fr);
 }
 
 .color-btn {
@@ -33,6 +33,17 @@ body {
   transition: transform 0.1s;
   width: 90px;
   height: 90px;
+}
+
+.square-btn {
+  aspect-ratio: 1;
+  border: 3px solid gray;
+  border-radius: 15px;
+  cursor: pointer;
+  transition: transform 0.1s;
+  width: 90px;
+  height: 90px;
+  font-size: 60px;
 }
 
 .color-btn.selected {
