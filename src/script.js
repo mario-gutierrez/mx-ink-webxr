@@ -15,6 +15,7 @@ let strokes = [];
 let painter = null;
 let gamepad1;
 let rearButtonPressed = false;
+let rearButtonT0 = 0;
 let isDrawingOutsideWhiteboard = false;
 let prevIsDrawing = false;
 
@@ -32,10 +33,13 @@ const DRAW_THRESHOLD = 0.002; // How close stylus needs to be to draw
 let constraint; // WhiteboardMarkerConstraint
 let stylus3dModel
 
-function clearWhiteboard() {
+window.clearWhiteboard = () => {
   whiteboardCtx.fillStyle = 'white';
   whiteboardCtx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
   if (canvasTexture) canvasTexture.needsUpdate = true;
+  if (gamepad1) {
+    gamepad1.hapticActuators[0].pulse(1, 200);
+  }
 }
 
 function drawOnCanvas(from, to) {
@@ -137,6 +141,10 @@ window.selectColor = (colorHex) => {
 
   // Apply color to whiteboard
   whiteboardInkColor = colorHex;
+
+  if (gamepad1) {
+    gamepad1.hapticActuators[0].pulse(1, 60);
+  }
 };
 
 function init() {
@@ -313,14 +321,32 @@ function animate() {
 
   if (gamepad1) {
     if (gamepad1.buttons[1].value && !rearButtonPressed) {
-      rearButtonPressed = true;
+      rearButtonT0 = performance.now();
       let stroke = strokes.pop();
       if (stroke) {
         stroke.mesh.removeFromParent();
         stroke = undefined;
+
+        // Access the haptic actuator
+        const actuator = gamepad1.hapticActuators[0];
+        // Trigger a pulse
+        actuator.pulse(1, 80);
       }
     }
+
     rearButtonPressed = gamepad1.buttons[1].value;
+
+    if (rearButtonPressed) {
+      const timeSinceButtonPressed = performance.now() - rearButtonT0;
+      if (timeSinceButtonPressed > 1500 && strokes.length > 0) {
+        strokes.forEach((stroke) => {
+          stroke.mesh.removeFromParent();
+          stroke = undefined;
+        });
+        strokes = [];
+        gamepad1.hapticActuators[0].pulse(1, 200);
+      }
+    }
   }
   // Render
   renderer.render(scene, camera);
