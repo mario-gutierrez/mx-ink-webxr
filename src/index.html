@@ -1,13 +1,38 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>MX Ink - WebXR</title>
     <link rel="stylesheet" href="./style.css">
 </head>
+
 <body>
     <canvas class="webgl"></canvas>
+    <div id="color-palette">
+        <button id="clearAll" class="square-btn" style="background: #FFFFFF" onclick="clearWhiteboard()">🗑️</button>
+
+        <button id="colorButton_FFFFFF" class="color-btn" style="background: #FFFFFF"
+            onclick="selectColor('#FFFFFF')"></button>
+        <button id="colorButton_000000" class="color-btn selected" style="background: #000000"
+            onclick="selectColor('#000000')"></button>
+        <button id="colorButton_FF0000" class="color-btn" style="background: #FF0000"
+            onclick="selectColor('#FF0000')"></button>
+        <button id="colorButton_FF8000" class="color-btn" style="background: #ff8000"
+            onclick="selectColor('#FF8000')"></button>
+        <button id="colorButton_FFE600" class="color-btn" style="background: #FFE600"
+            onclick="selectColor('#FFE600')"></button>
+        <button id="colorButton_00FF00" class="color-btn" style="background: #00FF00"
+            onclick="selectColor('#00FF00')"></button>
+        <button id="colorButton_00E1FF" class="color-btn" style="background: #00E1FF"
+            onclick="selectColor('#00E1FF')"></button>
+        <button id="colorButton_0000FF" class="color-btn" style="background: #0000FF"
+            onclick="selectColor('#0000FF')"></button>
+        <button id="colorButton_DD00FF" class="color-btn" style="background: #DD00FF"
+            onclick="selectColor('#DD00FF')"></button>
+    </div>
     <script type="module" src="./script.js"></script>
 </body>
+
 </html>
