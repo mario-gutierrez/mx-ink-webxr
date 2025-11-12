@@ -227,7 +227,7 @@ function init() {
   // handle constrained position when touching the virtual whiteboard
   const loader = new GLTFLoader();
   loader.load(
-    "assets/logitech_mx_ink.glb",
+    "./logitech_mx_ink.glb",
     (glb) => {
       console.log(glb);
       stylus3dModel = new THREE.Group();
