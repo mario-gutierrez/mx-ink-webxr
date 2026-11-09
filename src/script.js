@@ -16,6 +16,8 @@ let painter = null;
 let gamepad1;
 let rearButtonPressed = false;
 let rearButtonT0 = 0;
+let primaryButtonPressed = false;
+let paletteTouchActive = false;
 let isDrawingOutsideWhiteboard = false;
 let prevIsDrawing = false;
 
@@ -26,34 +28,155 @@ let whiteboardInkColor = '#000000';
 let drawWidth = 12;
 let eraserWidth = 36;
 let lastPoint = null;
+let whiteboardStrokes = [];
+let activeWhiteboardStroke = null;
+let hasUnsavedChanges = false;
+let isSaveFeedbackActive = false;
+let saveFeedbackTimeout;
+const SAVE_FEEDBACK_DURATION = 350;
 const CANVAS_WIDTH = 2048;
 const CANVAS_HEIGHT = 1024;
 const DRAW_THRESHOLD = 0.002; // How close stylus needs to be to draw
+const STROKE_PICK_RADIUS = 0.02;
+const STROKE_HIGHLIGHT_DELAY = 500;
 
 let constraint; // WhiteboardMarkerConstraint
 let stylus3dModel
+let paletteMesh;
+let paletteControlBounds = [];
+const paletteRaycaster = new THREE.Raycaster();
+const strokeHighlightColor = new THREE.Color(0xffffff);
+const strokeLocalPoint = new THREE.Vector3();
+const strokeSegment = new THREE.Vector3();
+const strokeToPoint = new THREE.Vector3();
+const strokeClosestPoint = new THREE.Vector3();
+let frontButtonPressed = false;
+let activeStrokeGrab = null;
+let undoActions = [];
+
+function pulseHaptic(duration = 60) {
+  const actuator = gamepad1?.hapticActuators?.[0];
+  actuator?.pulse?.(1, duration);
+}
+
+function hasDrawingInScene() {
+  return whiteboardStrokes.length > 0 || strokes.some((stroke) => stroke.points.length > 1);
+}
+
+function updateSaveButton() {
+  const saveButton = document.getElementById('saveDrawing');
+  if (!saveButton) return;
+
+  const hasDrawing = hasDrawingInScene();
+  const canSave = hasUnsavedChanges && hasDrawing;
+  saveButton.disabled = !canSave && !isSaveFeedbackActive;
+  const label = isSaveFeedbackActive
+    ? 'Saving drawing'
+    : canSave ? 'Save drawing as JSON'
+      : hasUnsavedChanges && !hasDrawing ? 'No drawing to save' : 'No new drawing to save';
+  saveButton.title = label;
+  saveButton.setAttribute('aria-label', label);
+}
+
+function markDrawingChanged() {
+  const saveButton = document.getElementById('saveDrawing');
+  const needsRefresh = !hasUnsavedChanges || saveButton?.disabled;
+  hasUnsavedChanges = true;
+  if (needsRefresh) updateSaveButton();
+}
 
 window.clearWhiteboard = () => {
+  const hadWhiteboardStrokes = whiteboardStrokes.length > 0;
   whiteboardCtx.fillStyle = 'white';
   whiteboardCtx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+  whiteboardStrokes = [];
+  activeWhiteboardStroke = null;
   if (canvasTexture) canvasTexture.needsUpdate = true;
-  if (gamepad1) {
-    gamepad1.hapticActuators[0].pulse(1, 200);
-  }
+  if (hadWhiteboardStrokes) markDrawingChanged();
+  pulseHaptic(60);
 }
 
 function drawOnCanvas(from, to) {
+  const lineWidth = whiteboardInkColor === "#FFFFFF" ? eraserWidth : drawWidth;
+  const previousPoint = activeWhiteboardStroke?.points.at(-1);
+  if (!activeWhiteboardStroke || activeWhiteboardStroke.color !== whiteboardInkColor ||
+    activeWhiteboardStroke.width !== lineWidth || previousPoint.x !== from.x || previousPoint.y !== from.y) {
+    activeWhiteboardStroke = {
+      color: whiteboardInkColor,
+      width: lineWidth,
+      points: [[from.x, from.y]]
+    };
+    whiteboardStrokes.push(activeWhiteboardStroke);
+  }
+  activeWhiteboardStroke.points.push([to.x, to.y]);
+  markDrawingChanged();
+
   whiteboardCtx.beginPath();
   whiteboardCtx.moveTo(from.x, from.y);
   whiteboardCtx.lineTo(to.x, to.y);
   whiteboardCtx.strokeStyle = whiteboardInkColor;
-  whiteboardCtx.lineWidth = whiteboardInkColor === "#FFFFFF" ? eraserWidth : drawWidth;
+  whiteboardCtx.lineWidth = lineWidth;
   whiteboardCtx.lineCap = 'round';
   whiteboardCtx.lineJoin = 'round';
   whiteboardCtx.stroke();
   // Tell three.js to update the texture
   if (canvasTexture) canvasTexture.needsUpdate = true;
 }
+
+window.saveDrawing = () => {
+  if (!hasUnsavedChanges || !hasDrawingInScene() || isSaveFeedbackActive) return;
+
+  isSaveFeedbackActive = true;
+  const saveButton = document.getElementById('saveDrawing');
+  saveButton?.classList.add('selected');
+  updateSaveButton();
+  pulseHaptic();
+
+  try {
+    const drawing = {
+      format: 'mx-ink-drawing',
+      version: 1,
+      whiteboard: {
+        canvasWidth: CANVAS_WIDTH,
+        canvasHeight: CANVAS_HEIGHT,
+        width: whiteboard.geometry.parameters.width,
+        height: whiteboard.geometry.parameters.height,
+        position: whiteboard.position.toArray(),
+        rotation: whiteboard.quaternion.toArray()
+      },
+      whiteboardStrokes,
+      strokes: strokes.filter((stroke) => stroke.points.length > 1).map((stroke) => {
+        stroke.mesh.updateWorldMatrix(true, false);
+        return {
+          color: `#${stroke.originalColor.getHexString()}`,
+          points: stroke.points.map((point) => stroke.mesh.localToWorld(point.clone()).toArray()),
+          widths: stroke.widths
+        };
+      })
+    };
+    const blob = new Blob([JSON.stringify(drawing, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `mx-ink-drawing-${new Date().toISOString().replace(/[:.]/g, '-')}.json`;
+    document.body.append(link);
+    link.click();
+    link.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    hasUnsavedChanges = false;
+  } catch (error) {
+    console.error('Unable to save drawing:', error);
+  } finally {
+    window.clearTimeout(saveFeedbackTimeout);
+    saveFeedbackTimeout = window.setTimeout(() => {
+      isSaveFeedbackActive = false;
+      saveButton?.classList.remove('selected');
+      updateSaveButton();
+    }, SAVE_FEEDBACK_DURATION);
+  }
+};
+
+updateSaveButton();
 // This function converts a 3D world position to 2D canvas coordinates
 function getDrawingCoordinates(worldPosition) {
   // Check distance to whiteboard plane
@@ -119,7 +242,17 @@ function setupUi() {
 
   // Create the HTMLMesh
   const paletteEl = document.getElementById('color-palette');
-  const paletteMesh = new HTMLMesh(paletteEl);
+  const paletteRect = paletteEl.getBoundingClientRect();
+  paletteControlBounds = Array.from(paletteEl.querySelectorAll('button'), (button) => {
+    const rect = button.getBoundingClientRect();
+    return {
+      left: (rect.left - paletteRect.left) / paletteRect.width,
+      right: (rect.right - paletteRect.left) / paletteRect.width,
+      top: (rect.top - paletteRect.top) / paletteRect.height,
+      bottom: (rect.bottom - paletteRect.top) / paletteRect.height
+    };
+  });
+  paletteMesh = new HTMLMesh(paletteEl);
 
   // Position the palette in 3D space (e.g., floating in front of user)
   paletteMesh.position.set(0, 0.75, -0.39);
@@ -143,9 +276,199 @@ window.selectColor = (colorHex) => {
   whiteboardInkColor = colorHex;
 
   if (gamepad1) {
-    gamepad1.hapticActuators[0].pulse(1, 60);
+    pulseHaptic();
   }
 };
+
+function dispatchPaletteClick(uv) {
+  paletteMesh.dispatchEvent({
+    type: 'click',
+    data: new THREE.Vector2(uv.x, 1 - uv.y)
+  });
+}
+
+function updatePaletteInteraction() {
+  if (!stylus || !gamepad1 || !paletteMesh) return false;
+
+  paletteRaycaster.setFromXRController(stylus);
+  const [intersection] = paletteRaycaster.intersectObject(paletteMesh, false);
+  const paletteX = intersection?.uv.x;
+  const paletteY = intersection ? 1 - intersection.uv.y : null;
+  const pointingAtControl = intersection && paletteControlBounds.some((bounds) =>
+    paletteX >= bounds.left && paletteX <= bounds.right &&
+    paletteY >= bounds.top && paletteY <= bounds.bottom
+  );
+
+  const primaryPressed = gamepad1.buttons[4]?.pressed || gamepad1.buttons[4]?.value > 0.5;
+  if (primaryPressed && !primaryButtonPressed) {
+    if (intersection) dispatchPaletteClick(intersection.uv);
+  }
+  primaryButtonPressed = primaryPressed;
+
+  const localTipPosition = paletteMesh.worldToLocal(stylus.position.clone());
+  const { width, height } = paletteMesh.geometry.parameters;
+  const touchingPalette = Math.abs(localTipPosition.z) <= 0.02 &&
+    Math.abs(localTipPosition.x) <= width / 2 &&
+    Math.abs(localTipPosition.y) <= height / 2;
+
+  if (touchingPalette && !paletteTouchActive) {
+    dispatchPaletteClick(new THREE.Vector2(
+      localTipPosition.x / width + 0.5,
+      localTipPosition.y / height + 0.5
+    ));
+  }
+  paletteTouchActive = touchingPalette;
+
+  return touchingPalette || pointingAtControl;
+}
+
+function getStrokeDistanceSquared(stroke, worldPosition) {
+  const points = stroke.points;
+  if (!points.length) return Infinity;
+
+  stroke.mesh.worldToLocal(strokeLocalPoint.copy(worldPosition));
+  if (stroke.boundingBox.distanceToPoint(strokeLocalPoint) > STROKE_PICK_RADIUS) return Infinity;
+
+  let minimumDistanceSquared = strokeLocalPoint.distanceToSquared(points[0]);
+  for (let index = 1; index < points.length; index++) {
+    const start = points[index - 1];
+    const end = points[index];
+    strokeSegment.subVectors(end, start);
+    const segmentLengthSquared = strokeSegment.lengthSq();
+    if (segmentLengthSquared === 0) continue;
+
+    const amount = THREE.MathUtils.clamp(
+      strokeToPoint.subVectors(strokeLocalPoint, start).dot(strokeSegment) / segmentLengthSquared,
+      0,
+      1
+    );
+    strokeClosestPoint.copy(start).addScaledVector(strokeSegment, amount);
+    minimumDistanceSquared = Math.min(
+      minimumDistanceSquared,
+      strokeClosestPoint.distanceToSquared(strokeLocalPoint)
+    );
+  }
+
+  return minimumDistanceSquared;
+}
+
+function setStrokeHighlighted(stroke, highlighted) {
+  if (stroke.isHighlighted === highlighted) return;
+
+  if (highlighted) {
+    stroke.mesh.material.color.copy(stroke.originalColor).lerp(strokeHighlightColor, 0.25);
+  } else {
+    stroke.mesh.material.color.copy(stroke.originalColor);
+  }
+  stroke.isHighlighted = highlighted;
+}
+
+function updateStrokeHighlights(tipPosition) {
+  if (activeStrokeGrab) return;
+
+  const now = performance.now();
+  const radiusSquared = STROKE_PICK_RADIUS * STROKE_PICK_RADIUS;
+  let highlightedNewStroke = false;
+  for (const stroke of strokes) {
+    if (stroke === painter) {
+      stroke.hoverStartedAt = null;
+      setStrokeHighlighted(stroke, false);
+      continue;
+    }
+
+    if (getStrokeDistanceSquared(stroke, tipPosition) <= radiusSquared) {
+      if (stroke.hoverStartedAt === null) stroke.hoverStartedAt = now;
+      if (!stroke.isHighlighted && now - stroke.hoverStartedAt >= STROKE_HIGHLIGHT_DELAY) {
+        setStrokeHighlighted(stroke, true);
+        highlightedNewStroke = true;
+      }
+    } else {
+      stroke.hoverStartedAt = null;
+      setStrokeHighlighted(stroke, false);
+    }
+  }
+
+  if (highlightedNewStroke) pulseHaptic();
+}
+
+function beginStrokeGrab(tipPosition) {
+  if (activeStrokeGrab || isDrawingOutsideWhiteboard || paletteTouchActive) return;
+
+  const radiusSquared = STROKE_PICK_RADIUS * STROKE_PICK_RADIUS;
+  const selectedStrokes = strokes.filter((stroke) =>
+    stroke !== painter &&
+    stroke.isHighlighted &&
+    getStrokeDistanceSquared(stroke, tipPosition) <= radiusSquared
+  );
+  if (!selectedStrokes.length) return;
+
+  const selectedSet = new Set(selectedStrokes);
+  const entries = selectedStrokes.map((stroke) => {
+    stroke.mesh.updateWorldMatrix(true, false);
+    return { stroke, originalWorldMatrix: stroke.mesh.matrixWorld.clone() };
+  });
+
+  for (const stroke of strokes) {
+    if (!selectedSet.has(stroke)) setStrokeHighlighted(stroke, false);
+    stroke.hoverStartedAt = null;
+  }
+  for (const { stroke } of entries) stylus.attach(stroke.mesh);
+  activeStrokeGrab = entries;
+}
+
+function finishStrokeGrab() {
+  if (!activeStrokeGrab) return;
+
+  const movedEntries = [];
+  for (const entry of activeStrokeGrab) {
+    scene.attach(entry.stroke.mesh);
+    entry.stroke.mesh.updateWorldMatrix(true, false);
+    const currentMatrix = entry.stroke.mesh.matrixWorld;
+    const changed = currentMatrix.elements.some((value, index) =>
+      Math.abs(value - entry.originalWorldMatrix.elements[index]) > 0.0001
+    );
+    if (changed) movedEntries.push(entry);
+    setStrokeHighlighted(entry.stroke, false);
+  }
+
+  if (movedEntries.length) undoActions.push({ type: 'move', entries: movedEntries });
+  if (movedEntries.length) markDrawingChanged();
+  for (const stroke of strokes) stroke.hoverStartedAt = null;
+  activeStrokeGrab = null;
+}
+
+function restoreStrokeWorldMatrix(stroke, worldMatrix) {
+  if (stroke.mesh.parent !== scene) scene.attach(stroke.mesh);
+  worldMatrix.decompose(stroke.mesh.position, stroke.mesh.quaternion, stroke.mesh.scale);
+  stroke.mesh.updateMatrix();
+  stroke.mesh.updateMatrixWorld(true);
+  setStrokeHighlighted(stroke, false);
+  stroke.hoverStartedAt = null;
+}
+
+function undoLastAction() {
+  if (activeStrokeGrab) finishStrokeGrab();
+
+  const action = undoActions.pop();
+  if (!action) return;
+
+  if (action.type === 'move') {
+    for (const entry of action.entries) {
+      restoreStrokeWorldMatrix(entry.stroke, entry.originalWorldMatrix);
+    }
+  } else {
+    const strokeIndex = strokes.indexOf(action.stroke);
+    if (strokeIndex !== -1) strokes.splice(strokeIndex, 1);
+    action.stroke.mesh.removeFromParent();
+    setStrokeHighlighted(action.stroke, false);
+    if (painter === action.stroke) {
+      painter = null;
+      isDrawingOutsideWhiteboard = false;
+    }
+  }
+  markDrawingChanged();
+  pulseHaptic(80);
+}
 
 function init() {
   const canvas = document.querySelector("canvas.webgl");
@@ -272,6 +595,9 @@ function initVariableTubePainter() {
   const material = new THREE.MeshBasicMaterial({
     color: color
   });
+  painter.originalColor = color.clone();
+  painter.hoverStartedAt = null;
+  painter.isHighlighted = false;
 
   // 4. Create Mesh and add to scene
   const mesh = new THREE.Mesh(painter.geometry, material);
@@ -282,6 +608,7 @@ function initVariableTubePainter() {
   painter.mesh = mesh;
 
   strokes.push(painter);
+  undoActions.push({ type: 'create', stroke: painter });
 
   // Initialize the first point
   painter.moveTo(stylus.position);
@@ -289,9 +616,11 @@ function initVariableTubePainter() {
 
 function animate() {
   if (gamepad1) {
+    const touchingPalette = updatePaletteInteraction();
     prevIsDrawing = isDrawingOutsideWhiteboard;
     // stylus inputs: primary and/or tip is active
-    isDrawingOutsideWhiteboard = gamepad1.buttons[5].value > 0 || gamepad1.buttons[4].value > 0;
+    isDrawingOutsideWhiteboard = !touchingPalette &&
+      (gamepad1.buttons[5].value > 0 || gamepad1.buttons[4].value > 0);
     // debugGamepad(gamepad1);
 
     const constrainedPose = constraint.getVisibleMarkerPose({
@@ -307,11 +636,14 @@ function animate() {
     if (lastPoint && currentPoint) {
       drawOnCanvas(lastPoint, currentPoint);
       isDrawingOutsideWhiteboard = false; // do not draw in 3D
+    } else if (!currentPoint) {
+      activeWhiteboardStroke = null;
     }
 
     // Update lastPoint for the next move.
     lastPoint = currentPoint;
 
+    if (prevIsDrawing && !isDrawingOutsideWhiteboard) painter = null;
     if (isDrawingOutsideWhiteboard && !prevIsDrawing) {
       initVariableTubePainter();
     }
@@ -320,18 +652,16 @@ function animate() {
   handleDrawing(stylus);
 
   if (gamepad1) {
+    updateStrokeHighlights(stylus.position);
+
+    const frontPressed = gamepad1.buttons[0]?.pressed || gamepad1.buttons[0]?.value > 0.5;
+    if (frontPressed && !frontButtonPressed) beginStrokeGrab(stylus.position);
+    if (!frontPressed && frontButtonPressed) finishStrokeGrab();
+    frontButtonPressed = frontPressed;
+
     if (gamepad1.buttons[1].value && !rearButtonPressed) {
       rearButtonT0 = performance.now();
-      let stroke = strokes.pop();
-      if (stroke) {
-        stroke.mesh.removeFromParent();
-        stroke = undefined;
-
-        // Access the haptic actuator
-        const actuator = gamepad1.hapticActuators[0];
-        // Trigger a pulse
-        actuator.pulse(1, 80);
-      }
+      undoLastAction();
     }
 
     rearButtonPressed = gamepad1.buttons[1].value;
@@ -344,7 +674,12 @@ function animate() {
           stroke = undefined;
         });
         strokes = [];
-        gamepad1.hapticActuators[0].pulse(1, 200);
+        undoActions = [];
+        activeStrokeGrab = null;
+        painter = null;
+        isDrawingOutsideWhiteboard = false;
+        markDrawingChanged();
+        pulseHaptic(200);
       }
     }
   }
@@ -362,7 +697,9 @@ function handleDrawing(controller) {
       if (painter) {
         // Update the stroke
         const width = Math.max(gamepad1.buttons[5].value, gamepad1.buttons[4].value);
+        const pointCount = painter.points.length;
         painter.lineTo(stylus.position, width * 0.01);
+        if (painter.points.length > pointCount) markDrawingChanged();
       }
     }
   }
